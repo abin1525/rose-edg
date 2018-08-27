@@ -1,0 +1,140 @@
+#!/bin/bash
+# NOTE: Eventually, we should remove the stuff marked by "DEPRECATED" [RPM 2012-10-05]
+
+# Run this script with "--help" to see nicely formatted info; or just read the perldoc here...
+:<<=cut
+
+=head1 NAME
+
+edg-generate-sig - generate or find an EDG binary tarball version number
+
+=head1 SYNOPSIS
+
+edg-generate-sig TOP_SRCDIR TOP_BLDDIR
+
+=head1 DESCRIPTION
+
+End users do not generally have licenses for EDG source code. Therefore, the ROSE team compiles an EDG binary library
+for most ROSE public releases.  EDG binary version numbers are SHA1 hashes that are generated from the parts of ROSE
+upon which the EDG library depends.
+
+=head1 BUGS
+
+Since the EDG binary version number is computed from a Git commit, the version number will not reflect changes that the user
+has not committed.  This applies to all files under the "util" and "src/ROSETTA" directories as well as the revision
+of the EDG source code.
+
+=head1 AUTHOR
+
+Robb Matzke.
+
+Copyright Lawrence Livermore National Security
+
+Licensed under Revised BSD License (see COPYRIGHT file at the top of the ROSE source tree)
+
+=cut
+#------------------------------------------------------------------------------------------------------------------------
+
+myname="${0##*/}"
+mydir="${0%$myname}"
+myname="${myname-edg-generate-sig}"
+
+help () {
+    LESS="$LESS -R"
+    (pod2man $0 |nroff -man || pod2text $0 || sed -ne '/^=pod/,/^=cut/p' $0) 2>/dev/null | ${PAGER-less}
+}
+
+# Parse command-line switches
+do_dump=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+	--help|-h|-\?) help; exit 0 ;;
+	--dump) do_dump=yes; shift ;;
+	-*) echo "$myname: unrecognized switch: $1" >&2; exit 1 ;;
+	*) break
+    esac
+done
+
+if [ "$#" -ne 2 ]; then
+    echo "usage: $myname TOP_SRCDIR TOP_BLDDIR" >&2
+    echo "       for details, see: $0 --help" >&2
+    exit 1;
+fi
+
+ROSE_SRC="$1"
+ROSE_BLD="$2"
+
+# These are the ROSETTA-generated files on which the EDG binary tarball depends
+EDG_GENERATED_DEPENDENCIES=("$ROSE_BLD/src/frontend/SageIII/Cxx_Grammar.h"
+			    "$ROSE_BLD/src/frontend/SageIII/AstQueryMemoryPool.h"
+			    "$ROSE_BLD/src/frontend/SageIII/Cxx_GrammarTreeTraversalAccessEnums.h"
+			    "$ROSE_BLD/src/frontend/SageIII/Cxx_GrammarMemoryPoolSupport.h"
+			    "$ROSE_BLD/src/frontend/SageIII/AST_FILE_IO.h"
+			    "$ROSE_BLD/src/frontend/SageIII/StorageClasses.h")
+
+#------------------------------------------------------------------------------------------------------------------------
+# Make sure ROSE source and build directories exist and that they look reasonable.
+check_directories() {
+    if [ ! -d "$ROSE_SRC/." ]; then
+	echo "$myname: ROSE source directory not found: $ROSE_SRC" >&2
+	exit 1
+    fi
+    if [ ! -d "$ROSE_SRC/scripts" ]; then
+	echo "$myname: doesn't seem to be the top of the ROSE source tree: $ROSE_SRC" >&2
+	exit 1
+    fi
+    if [ ! -d "$ROSE_BLD/." ]; then
+	echo "$myname: ROSE build directory not found: $ROSE_BLD" >&2
+	exit 1
+    fi
+    if [ ! -d "$ROSE_BLD/src/frontend/SageIII" ]; then
+	echo "$myname: doesn't seem to be the top of the ROSE build tree: $ROSE_BLD" >&2
+	exit 1
+    fi
+}
+
+#------------------------------------------------------------------------------------------------------------------------
+# Concatenate all sources on which EDG depends.
+cat_edg_dependencies() {
+    local edg_hash=$(cd "$ROSE_SRC" &&
+			    git ls-tree --full-tree HEAD src/frontend/CxxFrontend/EDG 2>/dev/null |\
+				cut -d' ' -f3 |cut -c1-7)
+    [ "$edg_hash" = "" ] && \
+	edg_hash=$(head -n1 "$ROSE_BLD/src/frontend/CxxFrontend/EDG-submodule-sha1" |cut -c1-7)
+
+    if [ "$edg_hash" = "" ]; then
+	echo "$0: This is not a Git archive." >&2
+	echo "     You'll need to obtain the SHA1 for the src/frontend/CxxFrontend/EDG submodule and place" >&2
+	echo "     its first 7 characters in a file named src/frontend/CxxFrontend/EDG-submodule-sha1 in your" >&2
+	echo "     ROSE build tree. The best way to find this is to go to to /src/frontend/CxxFrontend/EDG at" >&2
+	echo "     github.com or where ever you downloaded this source tree and copy the 7-letter hash found there." >&2
+	exit 1
+    fi
+
+    echo $edg_hash
+    for f in "${EDG_GENERATED_DEPENDENCIES[@]}"; do
+	if [ ! -r "$f" ]; then
+	    echo "$myname: cannot read generated EDG dependency: $f" >&2
+	    exit 1
+	fi
+	grep -v '#line' "$f"
+    done
+}
+
+#------------------------------------------------------------------------------------------------------------------------
+# Generate the SHA1 hash by for the source files (some generated) on which EDG depends.
+generate_edg_hash() {
+    local sha1=$(cat_edg_dependencies |sha1sum |cut -d' ' -f1)
+    echo "4.$sha1"		# this is version 4 of edg dependency hashing
+}
+
+#------------------------------------------------------------------------------------------------------------------------
+
+check_directories
+
+if [ "$do_dump" != "" ]; then
+    cat_edg_dependencies
+else
+    generate_edg_hash
+fi
+exit 0

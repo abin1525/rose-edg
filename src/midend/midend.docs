@@ -1,0 +1,5 @@
+// -*- c++ -*-
+
+/** @defgroup rose_midend ROSE midend
+ *
+ *  Tools for the processing and transformation of the AST. */
